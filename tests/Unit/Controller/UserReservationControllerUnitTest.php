@@ -1,45 +1,77 @@
 <?php
 
-namespace App\tests\Unit\Controller;
+namespace App\Tests\Unit\Controller;
 
 use App\Entity\User;
 use App\Repository\ReservationRepository;
-use App\Controller\UserReservationController;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\HttpFoundation\Response;
 
 class UserReservationControllerUnitTest extends WebTestCase
 {
-    private ReservationRepository $reservationRepository;
-    private UserReservationController $controller;
+    private $client;
+    private $reservationRepository;
 
     protected function setUp(): void
     {
+        $this->client = static::createClient();
         $this->reservationRepository = $this->createMock(ReservationRepository::class);
-        $this->controller = new UserReservationController($this->reservationRepository);
+        
+        // Mock the repository in the service container
+        $this->client->getContainer()->set(ReservationRepository::class, $this->reservationRepository);
     }
 
-    public function testInvokeReturnsReservations(): void
+    public function testAccessDeniedForUnauthenticatedUser()
     {
-        $user = new User();
-        $this->controller->setUser($user); // Assuming setUser method exists for test context
+        $this->client->request('GET', '/api/users/1/reservations');
 
-        $this->reservationRepository->method('findBy')->willReturn([]);
-
-        $response = $this->controller->__invoke(1);
-
-        $this->assertEquals(Response::HTTP_OK, $response->getStatusCode());
-        $this->assertJson($response->getContent());
+        $this->assertResponseStatusCodeSame(Response::HTTP_UNAUTHORIZED);
     }
 
-    public function testInvokeThrowsAccessDeniedException(): void
+    public function testNoReservationsFound()
     {
-        $user = new User();
-        $this->controller->setUser($user);
+        // Simulate login for user username 1
+        $this->logInUser(1);
+        
+        // Simulate the reservation repository returning no reservations
+        $this->reservationRepository
+            ->method('findBy')
+            ->willReturn([]);
 
-        $this->expectException(AccessDeniedException::class);
-        $this->controller->__invoke(1);
+        $this->client->request('GET', '/api/users/1/reservations');
+
+        $this->assertResponseStatusCodeSame(Response::HTTP_NOT_FOUND);
+        $this->assertJsonContains(['message' => 'No reservations found.']);
     }
 
-    // Add more tests for edge cases...
+    public function testReservationsFound()
+    {
+        // Simulate login for user username 1
+        $this->logInUser(1);
+        
+        // Simulate the reservation repository returning some reservations
+        $reservations = [
+            ['id' => 1, 'user' => ['id' => 1], 'date' => '2023-10-01'],
+            ['id' => 2, 'user' => ['id' => 1], 'date' => '2023-10-02'],
+        ];
+
+        $this->reservationRepository
+            ->method('findBy')
+            ->willReturn($reservations);
+
+        $this->client->request('GET', '/api/users/1/reservations');
+
+        $this->assertResponseStatusCodeSame(Response::HTTP_OK);
+        $this->assertJsonContains($reservations);
+    }
+
+    private function logInUser(int $userId): void
+    {
+        // Create a user and simulate authentication
+        $user = new User();
+        $user->setUsername('testuser'); // or any other property needed
+        // Set additional properties as necessary
+
+        $this->client->loginUser($user);
+    }
 }
